@@ -1,56 +1,64 @@
-import serial, requests, time, sys
+import serial
+import requests
+import time
+import sys
 
-SERIAL_PORT = 'COM5'
+SERIAL_PORT = 'COM5'     # Gateway ESP32 port
 BAUD_RATE   = 115200
-TARGET      = 4500
+FLASK_URL = 'https://fliotproject-production.up.railway.app/log'
+TARGET      = 3000       # stop after 3000 samples
 
-# Change to your Railway URL after deployment
-FLASK_URL = 'https://your-app.up.railway.app/log'
-
-print('Checking Railway API...')
+print('Checking Flask API...')
 try:
-    check = FLASK_URL.replace('/log','/status')
-    r = requests.get(check, timeout=10)
-    print(f"[OK] API running. Rows: {r.json().get('total',0)}")
-except Exception as e:
-    print(f'[ERROR] Cannot reach API: {e}'); sys.exit(1)
+    r = requests.get('http://127.0.0.1:5000/status', timeout=3)
+    print(f"[OK] Flask running. Current rows: {r.json().get('total',0)}")
+except:
+    print('[ERROR] Flask not running! Start log_api.py first in Terminal 1')
+    sys.exit(1)
 
+print(f'Connecting to {SERIAL_PORT}...')
 try:
     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=3)
     time.sleep(2)
     print(f'[OK] Connected to {SERIAL_PORT}')
 except serial.SerialException as e:
-    print(f'[ERROR] {e}'); sys.exit(1)
+    print(f'[ERROR] Cannot open {SERIAL_PORT}: {e}')
+    print('Fix: Close Arduino Serial Monitor — it blocks COM5')
+    sys.exit(1)
 
-print('Sending to Railway cloud...')
-print('-'*55)
+print('Waiting for data from Gateway...')
+print('-' * 55)
 count = 0
+
 try:
     while count < TARGET:
         raw = ser.readline()
         if not raw: continue
-        line = raw.decode('utf-8',errors='ignore').strip()
+        line = raw.decode('utf-8', errors='ignore').strip()
         if not line or ',' not in line: continue
         if line.startswith('[') or line.startswith('Gateway'): continue
         parts = line.split(',')
-        if len(parts)!=2: continue
-        node_id=parts[0].strip()
+        if len(parts) != 2: continue
+        node_id = parts[0].strip()
         if node_id not in ['node1','node2','node3']: continue
-        try: distance=float(parts[1].strip())
+        try: distance = float(parts[1].strip())
         except: continue
-        if distance<2.0 or distance>400.0: continue
-        count+=1
-        payload={'sample':count,'node':node_id,'distance':distance,'label':1}
+        if distance < 2.0 or distance > 400.0: continue
+        count += 1
+        payload = {'sample':count, 'node':node_id, 'distance':distance, 'label':1}
         try:
-            resp=requests.post(FLASK_URL,json=payload,timeout=10)
-            if resp.status_code==200:
-                total=resp.json().get('total',count)
-                print(f'[OK] Sample:{count:4d} | {node_id} | {distance:.2f}cm (total:{total})')
-            else: count-=1
+            resp = requests.post(FLASK_URL, json=payload, timeout=5)
+            if resp.status_code == 200:
+                total = resp.json().get('total', count)
+                print(f'[OK] Sample:{count:4d} | {node_id} | {distance:7.2f} cm  (total:{total})')
+            else:
+                count -= 1
         except requests.exceptions.ConnectionError:
-            print('[ERROR] Cannot reach Railway'); count-=1; time.sleep(3)
+            print('[ERROR] Flask stopped! Restart log_api.py')
+            count -= 1
+            time.sleep(2)
 except KeyboardInterrupt:
-    print(f'\nStopped. Collected:{count}')
+    print(f'\nStopped. Samples collected: {count}')
 finally:
     ser.close()
-    print('Download: your-app.up.railway.app/download')
+    print('Excel file saved at: dataset/sensor_dataset.xlsx')
