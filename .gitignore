@@ -1,0 +1,7 @@
+dataset/
+models/
+__pycache__/
+*.pkl
+*.pyc
+*.xlsx
+.env
