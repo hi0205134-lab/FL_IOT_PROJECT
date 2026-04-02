@@ -73,18 +73,15 @@ try:
         tag = '[ANOMALY]' if label == 'ANOMALY' else '[NORMAL ]'
         print(f'{tag} {node_id} | {distance:.2f}cm | score={prob:.4f} | {ts}')
 
-        # Always show all node statuses so every node knows others
-        n1 = node_status['node1']
-        n2 = node_status['node2']
-        n3 = node_status['node3']
-        print(f'  ALL NODES → node1:{n1}  node2:{n2}  node3:{n3}')
+        # Always show all node statuses
+        print(f'  ALL NODES → node1:{node_status["node1"]}  node2:{node_status["node2"]}  node3:{node_status["node3"]}')
 
         if coordinated:
             print(f'  *** COORDINATED ATTACK! Nodes: {", ".join(anomaly_nodes)} ***')
 
-        # Send to Railway cloud
+        # Send ALERT to Railway
         try:
-            payload = {
+            alert_payload = {
                 'timestamp':   ts,
                 'node':        node_id,
                 'distance':    distance,
@@ -93,7 +90,18 @@ try:
                 'coordinated': coordinated,
                 'all_nodes':   node_status.copy()
             }
-            requests.post(f'{FLASK_URL}/alert', json=payload, timeout=3)
+            requests.post(f'{FLASK_URL}/alert', json=alert_payload, timeout=3)
+        except:
+            pass
+
+        # Send LOG to Railway — THIS was missing, causing total samples = 0
+        try:
+            log_payload = {
+                'node':     node_id,
+                'distance': distance,
+                'label':    1 if label == 'ANOMALY' else 0
+            }
+            requests.post(f'{FLASK_URL}/log', json=log_payload, timeout=3)
         except:
             pass
 
