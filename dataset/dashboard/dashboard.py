@@ -1,250 +1,204 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import pickle
 import os
-import sys
-import json
 import requests
-from datetime import datetime
+import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+st.set_page_config(page_title="FL IoT IDS", layout="wide", page_icon="🛡️")
 
-RAILWAY_URL = "https://fliotproject-production.up.railway.app"
+RAILWAY_URL = 'https://fliotproject-production.up.railway.app'
 
-st.set_page_config(
-    page_title="FL IoT IDS Dashboard",
-    page_icon="shield",
-    layout="wide"
-)
+st.title("🛡️ FL IoT Intrusion Detection System")
+st.caption("Privacy-Preserving Federated Learning | 3 ESP32 Nodes | Real-time Detection")
 
-st.title("Federated Learning — IoT Intrusion Detection System")
-st.caption("Privacy-Preserving C-IDS | 3 ESP32 Nodes | LoRa E32 | HC-SR04")
+tabs = st.tabs(["📡 Live Detection", "📊 FL Results", "📈 Convergence", "ℹ️ About"])
 
-tab1, tab2, tab3, tab4 = st.tabs([
-    "Dataset",
-    "Model Metrics",
-    "FL Convergence",
-    "Live Detection"
-])
+# ── TAB 1: LIVE DETECTION ──────────────────────────────────────────────
+with tabs[0]:
 
-# ════════════════════════════════════════════════════════
-# TAB 1 — DATASET
-# ════════════════════════════════════════════════════════
-with tab1:
-    st.header("Collected Sensor Dataset")
-    f = "dataset/clean_dataset.csv"
-    if os.path.exists(f):
-        df = pd.read_csv(f)
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Samples", len(df))
-        c2.metric("Node 1",        len(df[df["node"] == "node1"]))
-        c3.metric("Node 2",        len(df[df["node"] == "node2"]))
-        c4.metric("Node 3",        len(df[df["node"] == "node3"]))
+    # Sidebar controls
+    with st.sidebar:
+        st.header("⚙️ Settings")
+        auto_refresh = st.checkbox("Auto-refresh", value=True)
+        refresh_sec  = st.selectbox("Refresh every", [5, 10, 30], index=1)
+        st.markdown("---")
+        st.markdown("**Node Ranges:**")
+        st.markdown("node1 (Door): 15–40 cm")
+        st.markdown("node2 (Window): 2–20 cm")
+        st.markdown("node3 (Hallway): 15–75 cm")
 
-        col1, col2 = st.columns(2)
-        col1.metric("Normal  (label=1)", int((df["label"] == 1).sum()))
-        col2.metric("Anomaly (label=0)", int((df["label"] == 0).sum()))
+    st.subheader("📡 Real-time Node Status")
 
-        st.subheader("Last 20 rows")
-        st.dataframe(df.tail(20), use_container_width=True)
-
-        st.subheader("Average distance by node")
-        pivot = df.groupby("node")["distance"].mean().reset_index()
-        st.bar_chart(pivot.set_index("node"))
-    else:
-        st.warning("clean_dataset.csv not found in dataset/ folder.")
-
-# ════════════════════════════════════════════════════════
-# TAB 2 — MODEL METRICS
-# ════════════════════════════════════════════════════════
-with tab2:
-    st.header("FL Client Model Metrics")
-    rows = []
-    for i in range(1, 4):
-        p = f"models/client{i}.pkl"
-        if os.path.exists(p):
-            d = pickle.load(open(p, "rb"))
-            m = d["metrics"]
-            rows.append({
-                "Client":   f"Node {i}",
-                "Samples":  d["sample_size"],
-                "Accuracy": round(m["accuracy"], 4),
-                "F1 Score": round(m["f1"],       4),
-                "Recall":   round(m["recall"],   4)
-            })
-    if rows:
-        df_m = pd.DataFrame(rows)
-        st.dataframe(df_m.set_index("Client"), use_container_width=True)
-        st.bar_chart(df_m.set_index("Client")[["Accuracy", "F1 Score", "Recall"]])
-    else:
-        st.info("Run training first: python server/run_federated_training.py")
-
-# ════════════════════════════════════════════════════════
-# TAB 3 — FL CONVERGENCE
-# ════════════════════════════════════════════════════════
-with tab3:
-    st.header("Federated Learning Convergence — 15 Rounds")
-    lf = "models/fl_convergence_log.csv"
-    if os.path.exists(lf):
-        log = pd.read_csv(lf).set_index("round")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Round 1 F1",   f"{log['f1'].iloc[0]:.4f}")
-        c2.metric("Final F1",     f"{log['f1'].iloc[-1]:.4f}",
-                  delta=f"+{log['f1'].iloc[-1]-log['f1'].iloc[0]:.4f}")
-        c3.metric("Final Recall", f"{log['recall'].iloc[-1]:.4f}")
-        st.subheader("F1 and Recall per Round")
-        st.line_chart(log[["f1", "recall"]])
-        st.subheader("All Round Metrics")
-        st.dataframe(log.round(4), use_container_width=True)
-    else:
-        st.info("Run training first.")
-
-# ════════════════════════════════════════════════════════
-# TAB 4 — LIVE DETECTION (fetches from Railway)
-# ════════════════════════════════════════════════════════
-with tab4:
-    st.header("Live Anomaly Detection")
-    st.caption(f"Fetching from: {RAILWAY_URL}/alerts")
-
-    # ── Auto-refresh every 10 seconds ─────────────────
-    import time
-    placeholder = st.empty()
-
-    # ── Fetch live alerts from Railway ────────────────
+    # Fetch status
     try:
-        resp   = requests.get(f"{RAILWAY_URL}/alerts", timeout=5)
-        alerts = resp.json()
-    except Exception as e:
+        r    = requests.get(f'{RAILWAY_URL}/status', timeout=5)
+        data = r.json()
+        total   = data.get('total', 0)
+        by_node = data.get('by_node', {})
+        api_ok  = True
+    except:
+        total   = 0
+        by_node = {}
+        api_ok  = False
+
+    if not api_ok:
+        st.error("Cannot reach Railway API. Check your internet connection.")
+
+    # Node status cards
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total Samples", total)
+    c2.metric("node1 (Front Door)", by_node.get('node1', 0))
+    c3.metric("node2 (Window)",     by_node.get('node2', 0))
+    c4.metric("node3 (Hallway)",    by_node.get('node3', 0))
+
+    st.markdown("---")
+
+    # Fetch alerts
+    try:
+        r2     = requests.get(f'{RAILWAY_URL}/alerts', timeout=5)
+        alerts = r2.json().get('alerts', [])
+    except:
         alerts = []
-        st.warning(f"Cannot reach Railway: {e}")
-        st.info("Make sure live_detect.py is running with hardware connected.")
 
     if alerts:
-        latest = alerts[-1]
+        df_alerts = pd.DataFrame(alerts)
 
-        # ── Status banner ──────────────────────────────
-        if latest.get("is_anomaly"):
-            st.error(
-                f"ANOMALY DETECTED — "
-                f"{latest['node']} | "
-                f"Distance: {latest['distance']} cm | "
-                f"Score: {latest['anomaly_score']} | "
-                f"{latest['timestamp'][:19]}"
-            )
+        # Check coordinated attack from latest alerts
+        latest = alerts[-5:]
+        anomaly_nodes = list(set([
+            a['node'] for a in latest if a.get('label') == 'ANOMALY'
+        ]))
+
+        if len(anomaly_nodes) >= 2:
+            st.error(f"🚨 COORDINATED ATTACK DETECTED!")
+            st.error(f"Nodes triggered: {', '.join(anomaly_nodes)}")
+            st.warning("Multiple zones breached simultaneously!")
+        elif len(anomaly_nodes) == 1:
+            st.warning(f"⚠️ ANOMALY detected at {anomaly_nodes[0]}")
         else:
-            st.success(
-                f"Normal — "
-                f"{latest['node']} | "
-                f"Distance: {latest['distance']} cm | "
-                f"Score: {latest['anomaly_score']} | "
-                f"{latest['timestamp'][:19]}"
-            )
+            st.success("✅ All nodes NORMAL")
 
-        # ── Summary metrics ────────────────────────────
-        total  = len(alerts)
-        anoms  = sum(1 for a in alerts if a.get("is_anomaly"))
-        normal = total - anoms
+        # All node status from latest reading
+        if 'node1_status' in df_alerts.columns:
+            st.subheader("Current Node Status")
+            last = df_alerts.iloc[-1]
+            col1, col2, col3 = st.columns(3)
+            for col, node, loc in zip(
+                [col1, col2, col3],
+                ['node1_status', 'node2_status', 'node3_status'],
+                ['Front Door', 'Window', 'Hallway']
+            ):
+                status = last.get(node, 'UNKNOWN')
+                icon   = "🔴" if status == 'ANOMALY' else "🟢"
+                col.metric(f"{icon} {loc}", status)
 
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Total Readings", total)
-        c2.metric("Normal",         normal)
-        c3.metric("Anomalies",      anoms)
-        c4.metric("Anomaly Rate",   f"{anoms/total*100:.1f}%")
+        # Recent alerts table
+        st.subheader("Recent Alerts (last 20)")
+        display_cols = ['timestamp', 'node', 'distance', 'score', 'label', 'coordinated']
+        display_cols = [c for c in display_cols if c in df_alerts.columns]
 
-        # ── Coordinated attack check ───────────────────
-        recent = alerts[-10:]
-        anom_nodes = set(
-            a["node"] for a in recent if a.get("is_anomaly")
-        )
-        if len(anom_nodes) >= 2:
-            st.error(
-                f"COORDINATED ATTACK DETECTED! "
-                f"Nodes triggered: {', '.join(sorted(anom_nodes))}"
-            )
+        def highlight(row):
+            if row.get('label') == 'ANOMALY':
+                return ['background-color: #ffcccc'] * len(row)
+            return ['background-color: #ccffcc'] * len(row)
 
-        # ── Live readings table ────────────────────────
-        st.subheader("Last 20 Live Readings")
-        df_alerts = pd.DataFrame(alerts[-20:][::-1])
-        df_alerts["status"] = df_alerts["is_anomaly"].apply(
-            lambda x: "ANOMALY" if x else "Normal"
-        )
         st.dataframe(
-            df_alerts[["timestamp", "node", "distance",
-                        "anomaly_score", "status"]],
+            df_alerts[display_cols].tail(20).style.apply(highlight, axis=1),
             use_container_width=True
         )
 
-        # ── Anomaly score trend chart ──────────────────
-        st.subheader("Anomaly Score Trend")
-        chart_data = pd.DataFrame(alerts[-50:])
-        chart_data.index = range(len(chart_data))
-        st.line_chart(chart_data["anomaly_score"])
-
-        # ── Per node breakdown ─────────────────────────
-        st.subheader("Readings per Node")
-        for node in ["node1", "node2", "node3"]:
-            node_alerts = [a for a in alerts if a["node"] == node]
-            if node_alerts:
-                n_anom = sum(1 for a in node_alerts if a.get("is_anomaly"))
-                st.text(
-                    f"{node}: {len(node_alerts)} readings | "
-                    f"Normal: {len(node_alerts)-n_anom} | "
-                    f"Anomaly: {n_anom}"
-                )
-
-        # ── Clear button ───────────────────────────────
-        if st.button("Clear All Live Alerts"):
-            try:
-                requests.post(f"{RAILWAY_URL}/clear_alerts", timeout=5)
-                st.success("Cleared. Refresh page.")
-            except Exception:
-                st.error("Could not reach Railway to clear alerts.")
-
-    else:
-        st.info(
-            "No live data yet. "
-            "Connect hardware and run: python detection/live_detect.py"
-        )
-
-    # ── Manual detection (slider) ──────────────────────
-    st.divider()
-    st.subheader("Manual Detection Test (no hardware needed)")
-
-    if os.path.exists("models/global_model.pkl") and \
-       os.path.exists("models/scaler.pkl"):
-        from clients.model import SimpleNN
-        gw    = pickle.load(open("models/global_model.pkl", "rb"))
-        sc    = pickle.load(open("models/scaler.pkl",        "rb"))
-        model = SimpleNN()
-        model.set_weights(gw)
-        st.success("Global FL model loaded")
-
-        node = st.selectbox("Select Node", ["node1", "node2", "node3"])
-        dist = st.slider("Distance (cm)", 1.0, 400.0, 30.0, step=0.5)
-
-        if st.button("Run Detection", type="primary"):
-            scaled = np.clip(
-                (dist - sc["min"]) / (sc["max"] - sc["min"]), 0.0, 1.0
+        # Per-node summary
+        st.subheader("Per-Node Anomaly Summary")
+        col1, col2, col3 = st.columns(3)
+        for col, node in zip([col1, col2, col3], ['node1', 'node2', 'node3']):
+            node_data     = df_alerts[df_alerts['node'] == node]
+            total_node    = len(node_data)
+            anomaly_count = len(node_data[node_data['label'] == 'ANOMALY'])
+            pct = (anomaly_count / total_node * 100) if total_node > 0 else 0
+            icon = "🔴" if anomaly_count > 0 else "🟢"
+            col.metric(
+                f"{icon} {node}",
+                f"{anomaly_count} anomalies",
+                f"{pct:.1f}% of {total_node} readings"
             )
-            X     = np.array([[scaled]], dtype=np.float32)
-            score = round(1.0 - float(model.predict_proba(X)[0]), 4)
-            if score > 0.5:
-                st.error(f"ANOMALY DETECTED | Score: {score}")
-            else:
-                st.success(f"Normal | Score: {score}")
-            st.json({
-                "ClientID":      node,
-                "Anomaly_Score": score,
-                "Is_Anomaly":    score > 0.5,
-                "Distance_cm":   dist,
-                "Timestamp":     datetime.now().isoformat()
-            })
     else:
-        st.warning("Train the model first.")
+        st.info("No live alert data yet.")
+        st.markdown("""
+        To see live data:
+        - Connect ESP32 hardware and run `live_detect.py`
+        - Or run `collect_data.py` with SIMULATE=True
+        """)
 
-    # ── Refresh button ─────────────────────────────────
-    if st.button("Refresh Live Data"):
+    # Auto-refresh
+    if auto_refresh:
+        st.caption(f"⏱ Auto-refreshing every {refresh_sec} seconds...")
+        time.sleep(refresh_sec)
         st.rerun()
 
-    st.caption("Click 'Refresh Live Data' to fetch latest from Railway")
+# ── TAB 2: FL RESULTS ──────────────────────────────────────────────────
+with tabs[1]:
+    st.subheader("Federated Learning — Client Results")
+
+    files = ['models/client1.pkl', 'models/client2.pkl', 'models/client3.pkl']
+    if all(os.path.exists(f) for f in files):
+        rows = []
+        for i, f in enumerate(files, 1):
+            d = pickle.load(open(f, 'rb'))
+            m = d.get('metrics', {})
+            rows.append({
+                'Client':   f'Client {i} (node{i})',
+                'Samples':  d.get('sample_size', 0),
+                'Accuracy': round(m.get('accuracy', 0), 4),
+                'F1 Score': round(m.get('f1', 0), 4),
+                'Recall':   round(m.get('recall', 0), 4),
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True)
+    else:
+        st.warning("Run federated training first.")
+
+# ── TAB 3: CONVERGENCE ─────────────────────────────────────────────────
+with tabs[2]:
+    st.subheader("FL Convergence — 15 Rounds")
+
+    log_file = 'models/fl_convergence_log.csv'
+    if os.path.exists(log_file):
+        df_log = pd.read_csv(log_file)
+        st.line_chart(df_log.set_index('round')[['accuracy', 'f1', 'recall']])
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Final Accuracy", f"{df_log['accuracy'].iloc[-1]:.4f}",
+                    f"+{df_log['accuracy'].iloc[-1]-df_log['accuracy'].iloc[0]:.4f}")
+        col2.metric("Final F1",       f"{df_log['f1'].iloc[-1]:.4f}",
+                    f"+{df_log['f1'].iloc[-1]-df_log['f1'].iloc[0]:.4f}")
+        col3.metric("Final Recall",   f"{df_log['recall'].iloc[-1]:.4f}",
+                    f"+{df_log['recall'].iloc[-1]-df_log['recall'].iloc[0]:.4f}")
+        st.dataframe(df_log, use_container_width=True)
+    else:
+        st.warning("Run federated training first.")
+
+# ── TAB 4: ABOUT ───────────────────────────────────────────────────────
+with tabs[3]:
+    st.subheader("Project Information")
+    st.markdown("""
+    **Privacy-Preserving Collaborative IDS using Federated Learning**
+
+    | Property | Value |
+    |---|---|
+    | Hardware | 3x ESP32 + HC-SR04 + LoRa E32 |
+    | Dataset | 4500 rows — 84.2% Normal, 15.8% Anomaly |
+    | FL Algorithm | FedAvg — 15 rounds |
+    | Normalization | Per-node (each node scaled independently) |
+    | Cloud | Railway (Flask API) + Streamlit |
+
+    **Node Deployment:**
+    - node1 → Front Door (normal: 15–40 cm)
+    - node2 → Window (normal: 2–20 cm)
+    - node3 → Hallway (normal: 15–75 cm)
+
+    **How Federated Learning Works:**
+    1. Each node trains on its own local data
+    2. Only model weights (not raw data) sent to server
+    3. Server averages weights using FedAvg
+    4. Global model sent back to all nodes
+    5. Privacy preserved — raw data never leaves device
+    """)
