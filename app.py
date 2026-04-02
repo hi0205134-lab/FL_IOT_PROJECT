@@ -62,7 +62,7 @@ def alert():
 def get_alerts():
     if os.path.exists(ALERT_FILE):
         df = pd.read_csv(ALERT_FILE)
-        return jsonify({'alerts': df.tail(100).to_dict(orient='records')})
+        return jsonify({'alerts': df.tail(1000).to_dict(orient='records')})
     return jsonify({'alerts': []})
 
 @app.route('/status', methods=['GET'])
