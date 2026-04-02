@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import pickle
 import os
 import sys
@@ -19,14 +20,20 @@ df['distance_raw'] = df['distance'].copy()
 node_scalers = {}
 
 for node in ['node1', 'node2', 'node3']:
-    mask  = df['node'] == node
-    n_min = df.loc[mask, 'distance'].min()
-    n_max = df.loc[mask, 'distance'].max()
-    df.loc[mask, 'distance'] = (df.loc[mask, 'distance'] - n_min) / (n_max - n_min)
-    node_scalers[node] = {'min': n_min, 'max': n_max}
-    print(f'{node}: min={n_min:.2f}  max={n_max:.2f}')
+    mask        = df['node'] == node
+    # Use NORMAL readings only (label=1) to set min/max
+    normal_mask = mask & (df['label'] == 1)
+    n_min = df.loc[normal_mask, 'distance'].min()
+    n_max = df.loc[normal_mask, 'distance'].max()
 
-print(f'After: min={df["distance"].min():.4f}  max={df["distance"].max():.4f}')
+    # Scale and CLIP between 0 and 1
+    scaled = (df.loc[mask, 'distance'] - n_min) / (n_max - n_min)
+    df.loc[mask, 'distance'] = np.clip(scaled, 0.0, 1.0)
+
+    node_scalers[node] = {'min': n_min, 'max': n_max}
+    print(f'{node}: normal_min={n_min:.2f}cm  normal_max={n_max:.2f}cm')
+
+print(f'After normalization: min={df["distance"].min():.4f}  max={df["distance"].max():.4f}')
 
 os.makedirs('models', exist_ok=True)
 pickle.dump({
