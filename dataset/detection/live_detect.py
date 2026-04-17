@@ -21,8 +21,8 @@ RAILWAY_URL  = 'https://fliotproject-production.up.railway.app'
 # Before 8am and after 8pm : FL model checks anomaly
 # Change WORK_START_HOUR and WORK_END_HOUR freely for demo.
 # No retraining needed after changing these two values.
-WORK_START_HOUR = 8    # 0-23
-WORK_END_HOUR   = 20   # 0-23  (20 = 8:00 PM)
+WORK_START_HOUR = 22 # 0-23
+WORK_END_HOUR   = 23  # 0-23  (22 = 10:00 PM)
 # ──────────────────────────────────────────────────────────────
  
 def is_working_hours():

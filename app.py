@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify, send_file
 import pandas as pd
 import os
-
 app = Flask(__name__)
 FILE       = 'dataset/sensor_dataset.csv'
 ALERT_FILE = 'dataset/alerts.csv'
@@ -62,7 +61,7 @@ def alert():
 def get_alerts():
     if os.path.exists(ALERT_FILE):
         df = pd.read_csv(ALERT_FILE)
-        return jsonify({'alerts': df.tail(1000).to_dict(orient='records')})
+        return jsonify({'alerts': df.tail(3000).to_dict(orient='records')})
     return jsonify({'alerts': []})
 
 @app.route('/status', methods=['GET'])
